@@ -12,6 +12,7 @@ const DATA_DIR = path.join(ROOT_DIR, 'data');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const DB_PATH = path.join(DATA_DIR, 'cookbook.sqlite');
 const BACKUP_JSON_PATH = path.join(DATA_DIR, 'recipes-backup.json');
+const VELINA_JPG_PATH = path.join(ROOT_DIR, 'Velina.jpg');
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -66,6 +67,19 @@ function rowToRecipe(row) {
   } catch (_) {
     links = [];
   }
+
+  // Normalize ingredient fields including calories & optional flags
+  ingredients = ingredients.map((ing, idx) => ({
+    id: ing.id || `ing-${idx + 1}`,
+    name: String(ing.name || '').trim(),
+    amount: Math.max(0, Number(ing.amount) || 0),
+    unit: String(ing.unit ?? 'g').trim(),
+    calories: Math.max(0, Number(ing.calories) || 0),
+    isOptional: Boolean(ing.isOptional),
+    isEnabled: ing.isEnabled !== undefined ? Boolean(ing.isEnabled) : true,
+    notes: String(ing.notes ?? '').trim()
+  }));
+
   return {
     id: row.id,
     title: row.title,
@@ -136,6 +150,9 @@ function upsertRecipe(input, existingId = null) {
       name: String(ing.name).trim(),
       amount: Math.max(0, Number(ing.amount) || 0),
       unit: String(ing.unit ?? '').trim(),
+      calories: Math.max(0, Number(ing.calories) || 0),
+      isOptional: Boolean(ing.isOptional),
+      isEnabled: ing.isEnabled !== undefined ? Boolean(ing.isEnabled) : true,
       notes: String(ing.notes ?? '').trim()
     }));
 
@@ -307,6 +324,13 @@ const server = http.createServer(async (req, res) => {
 
     const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     const pathname = decodeURIComponent(parsedUrl.pathname);
+
+    if (pathname === '/velina.jpg' || pathname === '/Velina.jpg') {
+      if (fs.existsSync(VELINA_JPG_PATH)) {
+        serveStaticFile(res, VELINA_JPG_PATH);
+        return;
+      }
+    }
 
     if (pathname === '/api/health' && req.method === 'GET') {
       const recipes = getAllRecipes();

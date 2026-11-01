@@ -28,7 +28,9 @@ const state = {
   activeLinkIndex: 0,
   checkedSteps: {},
   scale: {
+    mode: 'auto', // 'auto' (default: scale all ingredients) | 'single' (only adjust edited ingredient)
     factor: 1,
+    customFactors: {}, // { [ingId]: individualMultiplier }
     anchorIngredientId: null,
     unitOverrides: {},
     smartUnits: true
@@ -70,10 +72,53 @@ function computeSmartUnitBadge(scaledVal, unit) {
   return null;
 }
 
+function getEffectiveIngredientFactor(ingId) {
+  if (state.scale.customFactors[ingId] !== undefined) {
+    return state.scale.customFactors[ingId];
+  }
+  return state.scale.factor;
+}
+
+function isAnyPortionModified() {
+  if (Math.abs(state.scale.factor - 1) >= 0.005) return true;
+  return Object.values(state.scale.customFactors).some((f) => Math.abs(f - 1) >= 0.005);
+}
+
 function resetScale() {
+  // Always keep 'auto' as the default behavior on reset
   state.scale.factor = 1;
+  state.scale.customFactors = {};
   state.scale.anchorIngredientId = null;
   state.scale.unitOverrides = {};
+}
+
+function computeIngredientScaledCalories(ing) {
+  const baseCal = Number(ing.calories) || 0;
+  if (baseCal <= 0) return 0;
+  const factor = getEffectiveIngredientFactor(ing.id);
+  return Math.round(baseCal * factor);
+}
+
+function computeTotalRecipeCalories(recipe) {
+  if (!recipe || !Array.isArray(recipe.ingredients)) return 0;
+  let total = 0;
+  for (const ing of recipe.ingredients) {
+    const enabled = ing.isOptional ? ing.isEnabled !== false : true;
+    if (!enabled) continue;
+    total += computeIngredientScaledCalories(ing);
+  }
+  return Math.round(total);
+}
+
+function computeBaseRecipeCalories(recipe) {
+  if (!recipe || !Array.isArray(recipe.ingredients)) return 0;
+  let total = 0;
+  for (const ing of recipe.ingredients) {
+    const enabled = ing.isOptional ? ing.isEnabled !== false : true;
+    if (!enabled) continue;
+    total += Number(ing.calories) || 0;
+  }
+  return Math.round(total);
 }
 
 function getActiveRecipe() {
@@ -132,7 +177,6 @@ function renderSidebar() {
   const countEl = document.getElementById('sidebarRecipeCount');
   if (countEl) countEl.textContent = String(state.recipes.length);
 
-  // Category filter pills built only from user's actual recipes
   const catBar = document.getElementById('categoryFilterBar');
   if (catBar) {
     const cats = Array.from(new Set(state.recipes.map((r) => r.category || 'General')));
@@ -180,12 +224,12 @@ function renderSidebar() {
     .map((r) => {
       const isSelected = active && active.id === r.id;
       const ingCount = (r.ingredients || []).length;
-      const linkCount = (r.links || []).length;
+      const baseCal = computeBaseRecipeCalories(r);
       return `
         <div class="recipe-list-item ${isSelected ? 'active' : ''}" data-select-id="${escapeHtml(r.id)}">
           <div class="recipe-item-title">${escapeHtml(r.title)}</div>
           <div class="recipe-item-meta">
-            ${escapeHtml(r.category || 'General')} • ${ingCount} ingredient${ingCount === 1 ? '' : 's'}${linkCount ? ' • 🎬 Video/Link' : ''}
+            ${escapeHtml(r.category || 'General')} • ${ingCount} ing${ingCount === 1 ? '' : 's'}${baseCal > 0 ? ` • 🔥 ${baseCal} kcal` : ''}
           </div>
         </div>
       `;
@@ -196,6 +240,7 @@ function renderSidebar() {
     el.addEventListener('click', () => {
       state.activeRecipeId = el.getAttribute('data-select-id');
       state.activeLinkIndex = 0;
+      state.scale.mode = 'auto';
       resetScale();
       renderAll();
     });
@@ -206,7 +251,6 @@ function renderMainWorkspace() {
   const mainEl = document.getElementById('mainWorkspace');
   if (!mainEl) return;
 
-  // GUIDED EMPTY STATE WHEN 0 RECIPES EXIST
   if (!state.recipes.length) {
     mainEl.innerHTML = `
       <div class="empty-guide-card">
@@ -219,13 +263,13 @@ function renderMainWorkspace() {
         <div class="guide-steps-grid">
           <div class="guide-step-box">
             <span class="guide-step-num">Step 1</span>
-            <h3>Enter Your Base Recipe</h3>
-            <p>Click the orange button below to enter your recipe title and base ingredients (like <code>1 kg Pork</code> and <code>1 tbsp Soy Sauce</code>).</p>
+            <h3>Ingredients &amp; Calories</h3>
+            <p>Enter your base ingredients (like <code>1 kg Pork</code> and <code>1 tbsp Soy Sauce</code>), optional calories per ingredient, and mark any optional ingredients.</p>
           </div>
           <div class="guide-step-box">
             <span class="guide-step-num">Step 2</span>
-            <h3>Auto-Scale Portions</h3>
-            <p>When cooking, type a new number into <strong>any ingredient box</strong> (e.g. change <code>1 kg</code> to <code>2 kg</code>) and every other ingredient scales automatically.</p>
+            <h3>Auto-Adjust or Single</h3>
+            <p>By default, changing any ingredient scales the whole recipe automatically—or switch to <strong>Single Ingredient Only</strong> to adjust just one item.</p>
           </div>
           <div class="guide-step-box">
             <span class="guide-step-num">Step 3</span>
@@ -249,7 +293,8 @@ function renderMainWorkspace() {
   if (!recipe) return;
 
   const factor = roundNice(state.scale.factor);
-  const isScaled = Math.abs(state.scale.factor - 1) >= 0.005;
+  const modified = isAnyPortionModified();
+  const totalCalories = computeTotalRecipeCalories(recipe);
 
   mainEl.innerHTML = `
     <!-- RECIPE HEADER -->
@@ -260,8 +305,9 @@ function renderMainWorkspace() {
           <span class="recipe-category-badge">${escapeHtml(recipe.category || 'General')}</span>
           <h1 class="recipe-main-title">${escapeHtml(recipe.title)}</h1>
           <div class="recipe-sub-meta">
-            Base Servings: <strong>${roundNice(recipe.baseServings || 1)}</strong>
-            ${recipe.prepTimeMin ? ` • Cook Time: <strong>${escapeHtml(recipe.prepTimeMin)} mins</strong>` : ''}
+            <span>Base Servings: <strong>${roundNice(recipe.baseServings || 1)}</strong></span>
+            ${recipe.prepTimeMin ? `<span>• Cook Time: <strong>${escapeHtml(recipe.prepTimeMin)} mins</strong></span>` : ''}
+            <span class="header-cal-pill" id="headerTotalCaloriesPill">🔥 Final Recipe Calories: ${totalCalories} kcal</span>
           </div>
         </div>
       </div>
@@ -272,23 +318,50 @@ function renderMainWorkspace() {
     </div>
 
     <div class="recipe-workspace-grid">
-      <!-- LEFT COLUMN: AUTOMATIC PROPORTION SCALER -->
+      <!-- LEFT COLUMN: AUTOMATIC PROPORTION SCALER & CALORIE CALCULATOR -->
       <div>
         <section class="section-card">
           <div class="section-bar">
-            <span class="section-bar-title">⚖️ Automatic Ingredient Proportion Scaler</span>
-            <span class="section-bar-pill" id="scaleBadgePill">${factor}× ${isScaled ? 'Scaled' : 'Base'}</span>
+            <span class="section-bar-title">⚖️ Ingredient Portions, Optional Toggles &amp; Calories</span>
+            <span class="section-bar-pill" id="scaleBadgePill">${state.scale.mode === 'auto' ? `${factor}× ${modified ? 'Scaled' : 'Base'}` : 'Custom Portions'}</span>
           </div>
           <div class="section-body">
-            <div class="howto-callout">
-              💡 <strong>Where to scale:</strong> Click inside any ingredient's number box below and type the amount you have (for example, change <code>1</code> to <code>2</code>)—all other ingredients will adjust automatically.
+            <!-- SCALING MODE SWITCHER (Default = Auto-Adjust All) -->
+            <div class="mode-switcher-bar">
+              <span class="mode-switcher-label">Portion Adjustment Mode:</span>
+              <div class="mode-btn-group">
+                <button
+                  type="button"
+                  class="mode-btn ${state.scale.mode === 'auto' ? 'active' : ''}"
+                  id="modeAutoAdjustBtn"
+                  title="Default: Changing any ingredient automatically adjusts all other ingredients proportionally"
+                >
+                  🔗 Auto-Adjust All (Default)
+                </button>
+                <button
+                  type="button"
+                  class="mode-btn ${state.scale.mode === 'single' ? 'active' : ''}"
+                  id="modeSingleAdjustBtn"
+                  title="Increase or decrease a single ingredient without changing the other ingredients"
+                >
+                  🔓 Single Ingredient Only (Don't Scale Others)
+                </button>
+              </div>
+            </div>
+
+            <div class="howto-callout" id="modeGuideCallout">
+              ${
+                state.scale.mode === 'auto'
+                  ? '💡 <strong>Auto-Adjust Mode (Default):</strong> Type a new number into any ingredient box below (e.g. change <code>1</code> kg to <code>2</code> kg) and all other ingredients + total calories will adjust automatically.'
+                  : '💡 <strong>Single Ingredient Mode:</strong> Type a new number into any ingredient box below to increase or decrease <strong>only that ingredient</strong> without changing the rest of the recipe.'
+              }
             </div>
 
             <div class="scaler-toolbar">
               <div class="mult-group">
-                <span class="mult-label">Quick Multiply:</span>
+                <span class="mult-label">Quick Scale All:</span>
                 <button type="button" class="mult-pill ${Math.abs(factor - 0.5) < 0.01 ? 'active' : ''}" data-mult="0.5">0.5×</button>
-                <button type="button" class="mult-pill ${Math.abs(factor - 1) < 0.01 ? 'active' : ''}" data-mult="1">1× (Original)</button>
+                <button type="button" class="mult-pill ${Math.abs(factor - 1) < 0.01 && !modified ? 'active' : ''}" data-mult="1">1× (Original)</button>
                 <button type="button" class="mult-pill ${Math.abs(factor - 1.5) < 0.01 ? 'active' : ''}" data-mult="1.5">1.5×</button>
                 <button type="button" class="mult-pill ${Math.abs(factor - 2) < 0.01 ? 'active' : ''}" data-mult="2">2×</button>
                 <button type="button" class="mult-pill ${Math.abs(factor - 3) < 0.01 ? 'active' : ''}" data-mult="3">3×</button>
@@ -300,23 +373,36 @@ function renderMainWorkspace() {
               </label>
             </div>
 
-            <div class="scale-active-banner ${isScaled ? '' : 'hidden'}" id="scaleStatusBanner">
-              <span id="scaleStatusText">Currently scaled to <strong>${factor}×</strong></span>
+            <div class="scale-active-banner ${modified ? '' : 'hidden'}" id="scaleStatusBanner">
+              <span id="scaleStatusText">Portions adjusted (${state.scale.mode === 'auto' ? `${factor}×` : 'Custom'})</span>
               <div class="scale-banner-btns">
-                <button type="button" class="btn-secondary-sm" id="resetScaleBtn">↺ Reset to 1×</button>
-                <button type="button" class="btn-secondary-sm" id="saveScaledAsBaseBtn" title="Overwrite base recipe with these scaled amounts">💾 Save as New Base</button>
+                <button type="button" class="btn-secondary-sm" id="resetScaleBtn">↺ Reset to 1× Original</button>
+                <button type="button" class="btn-secondary-sm" id="saveScaledAsBaseBtn" title="Save these exact amounts and calories as the new 1x base recipe">💾 Save as New Base</button>
               </div>
             </div>
 
             <div class="ing-list" id="scalerIngredientsList"></div>
 
+            <!-- FINAL RECIPE TOTAL CALORIES BAR -->
+            <div class="total-calories-bar">
+              <div class="total-cal-left">
+                🔥 <strong>Final Recipe Total Calories</strong> (sums all active ingredients, updates as you scale or toggle optional items):
+              </div>
+              <div class="total-cal-right" id="totalRecipeCaloriesValue">${totalCalories} kcal</div>
+            </div>
+
             <!-- Inline Quick Add Ingredient -->
             <form class="inline-add-form" id="quickAddIngredientForm">
-              <input type="text" id="quickIngName" placeholder="+ Add ingredient (e.g. Garlic)" required />
-              <input type="number" id="quickIngAmount" placeholder="Amount" step="any" min="0" required />
+              <input type="text" id="quickIngName" placeholder="+ Add ingredient (e.g. Sesame Oil)" required />
+              <input type="number" id="quickIngAmount" placeholder="Amt" step="any" min="0" required />
               <select id="quickIngUnit" aria-label="Unit">
                 ${ALL_UNITS.map((u) => `<option value="${escapeHtml(u)}" ${u === 'tbsp' ? 'selected' : ''}>${escapeHtml(u)}</option>`).join('')}
               </select>
+              <input type="number" id="quickIngCalories" placeholder="Calories (kcal)" step="any" min="0" />
+              <label class="inline-opt-check" title="Mark this ingredient as optional so you can toggle it on or off">
+                <input type="checkbox" id="quickIngOptional" />
+                <span>Optional</span>
+              </label>
               <button type="submit" class="btn-secondary-sm">+ Add</button>
             </form>
           </div>
@@ -385,9 +471,13 @@ function renderIngredientsRows(recipe) {
     .map((ing) => {
       const selectedUnit = state.scale.unitOverrides[ing.id] || ing.unit || 'g';
       const baseInUnit = convertAmountBetweenUnits(Number(ing.amount) || 0, ing.unit, selectedUnit);
-      const scaledVal = roundNice(baseInUnit * state.scale.factor);
+      const effFactor = getEffectiveIngredientFactor(ing.id);
+      const scaledVal = roundNice(baseInUnit * effFactor);
       const smartBadge = computeSmartUnitBadge(scaledVal, selectedUnit);
       const isAnchor = state.scale.anchorIngredientId === ing.id;
+      const isOpt = Boolean(ing.isOptional);
+      const isEnabled = isOpt ? ing.isEnabled !== false : true;
+      const scaledCal = computeIngredientScaledCalories(ing);
 
       const baseDef = UNIT_DEFS[String(ing.unit || '').toLowerCase()];
       const compatibleUnits = baseDef
@@ -396,10 +486,23 @@ function renderIngredientsRows(recipe) {
       if (ing.unit && !compatibleUnits.includes(ing.unit)) compatibleUnits.unshift(ing.unit);
 
       return `
-        <div class="ing-row ${isAnchor ? 'anchor-active' : ''}" data-ing-row="${escapeHtml(ing.id)}">
-          <div>
-            <div class="ing-name">${escapeHtml(ing.name)}${ing.notes ? ` <span style="font-weight:400;color:var(--ink-muted);">(${escapeHtml(ing.notes)})</span>` : ''}</div>
-            <div class="ing-base-sub">Base (1×): ${roundNice(ing.amount)} ${escapeHtml(ing.unit)}</div>
+        <div class="ing-row ${isAnchor ? 'anchor-active' : ''} ${!isEnabled ? 'disabled-optional' : ''}" data-ing-row="${escapeHtml(ing.id)}">
+          <div class="ing-left-col">
+            <div class="ing-title-line">
+              <span class="ing-name">${escapeHtml(ing.name)}${ing.notes ? ` <span style="font-weight:400;color:var(--ink-muted);">(${escapeHtml(ing.notes)})</span>` : ''}</span>
+              ${
+                isOpt
+                  ? `<button type="button" class="optional-badge-toggle ${isEnabled ? '' : 'off'}" data-toggle-optional="${escapeHtml(ing.id)}" title="Click to toggle this optional ingredient ON or OFF">
+                      ${isEnabled ? '☑ Optional: ON' : '☐ Optional: OFF (Skipped)'}
+                    </button>`
+                  : `<button type="button" class="make-optional-btn" data-mark-optional="${escapeHtml(ing.id)}" title="Click to mark this ingredient as Optional">
+                      + Make Optional
+                    </button>`
+              }
+            </div>
+            <div class="ing-base-sub">
+              Base (1×): ${roundNice(ing.amount)} ${escapeHtml(ing.unit)}${ing.calories ? ` • ${Math.round(ing.calories)} kcal` : ''}
+            </div>
           </div>
 
           <div class="ing-controls">
@@ -410,20 +513,25 @@ function renderIngredientsRows(recipe) {
               class="ing-amount-input"
               data-ing-id="${escapeHtml(ing.id)}"
               value="${scaledVal}"
-              title="Type a new amount here to scale the entire recipe"
+              ${!isEnabled ? 'disabled' : ''}
+              title="${state.scale.mode === 'auto' ? 'Type a new amount to auto-scale all ingredients' : 'Type a new amount to adjust ONLY this ingredient'}"
             />
-            <select class="ing-unit-select" data-ing-unit="${escapeHtml(ing.id)}">
+            <select class="ing-unit-select" data-ing-unit="${escapeHtml(ing.id)}" ${!isEnabled ? 'disabled' : ''}>
               ${compatibleUnits
                 .map((u) => `<option value="${escapeHtml(u)}" ${u === selectedUnit ? 'selected' : ''}>${escapeHtml(u)}</option>`)
                 .join('')}
             </select>
             <span class="ing-smart-badge ${smartBadge ? '' : 'hidden'}" data-smart-badge="${escapeHtml(ing.id)}">= ${escapeHtml(smartBadge || '')}</span>
+            <span class="ing-cal-badge" data-cal-badge="${escapeHtml(ing.id)}" title="Scaled calories for this ingredient">
+              🔥 ${isEnabled ? scaledCal : 0} kcal
+            </span>
           </div>
         </div>
       `;
     })
     .join('');
 
+  // Amount input listener (handles BOTH Auto-Adjust All mode and Single Ingredient Only mode!)
   listEl.querySelectorAll('.ing-amount-input').forEach((inputEl) => {
     inputEl.addEventListener('input', (e) => {
       const ingId = inputEl.getAttribute('data-ing-id');
@@ -436,17 +544,50 @@ function renderIngredientsRows(recipe) {
       const baseInSelected = convertAmountBetweenUnits(Number(ing.amount) || 0, ing.unit, selectedUnit);
       if (baseInSelected <= 0) return;
 
-      state.scale.factor = Math.max(0.01, rawVal / baseInSelected);
+      const newRatio = Math.max(0, rawVal / baseInSelected);
       state.scale.anchorIngredientId = ingId;
+
+      if (state.scale.mode === 'single') {
+        // SINGLE INGREDIENT MODE: Only change this ingredient's portion, leave others untouched!
+        state.scale.customFactors[ingId] = newRatio;
+      } else {
+        // AUTO-ADJUST MODE (DEFAULT): Scale all ingredients proportionally!
+        state.scale.factor = Math.max(0.01, newRatio);
+        state.scale.customFactors = {};
+      }
+
       updateIngredientValuesInPlace(recipe, inputEl);
     });
   });
 
+  // Unit change listener
   listEl.querySelectorAll('.ing-unit-select').forEach((selEl) => {
     selEl.addEventListener('change', () => {
       const ingId = selEl.getAttribute('data-ing-unit');
       state.scale.unitOverrides[ingId] = selEl.value;
       updateIngredientValuesInPlace(recipe, null);
+    });
+  });
+
+  // Toggle Optional ON / OFF
+  listEl.querySelectorAll('[data-toggle-optional]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const ingId = btn.getAttribute('data-toggle-optional');
+      const nextIngs = (recipe.ingredients || []).map((i) =>
+        i.id === ingId ? { ...i, isEnabled: i.isEnabled === false ? true : false } : i
+      );
+      await saveRecipeToServer({ ...recipe, ingredients: nextIngs }, recipe.id);
+    });
+  });
+
+  // Mark an existing ingredient as Optional with 1 click
+  listEl.querySelectorAll('[data-mark-optional]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const ingId = btn.getAttribute('data-mark-optional');
+      const nextIngs = (recipe.ingredients || []).map((i) =>
+        i.id === ingId ? { ...i, isOptional: true, isEnabled: true } : i
+      );
+      await saveRecipeToServer({ ...recipe, ingredients: nextIngs }, recipe.id);
     });
   });
 }
@@ -459,13 +600,15 @@ function updateIngredientValuesInPlace(recipe, skipInputEl = null) {
     const rowEl = listEl.querySelector(`[data-ing-row="${CSS.escape(ing.id)}"]`);
     const inputEl = listEl.querySelector(`.ing-amount-input[data-ing-id="${CSS.escape(ing.id)}"]`);
     const badgeEl = listEl.querySelector(`[data-smart-badge="${CSS.escape(ing.id)}"]`);
+    const calEl = listEl.querySelector(`[data-cal-badge="${CSS.escape(ing.id)}"]`);
 
     const isAnchor = state.scale.anchorIngredientId === ing.id;
     if (rowEl) rowEl.classList.toggle('anchor-active', isAnchor);
 
     const selectedUnit = state.scale.unitOverrides[ing.id] || ing.unit || 'g';
     const baseInUnit = convertAmountBetweenUnits(Number(ing.amount) || 0, ing.unit, selectedUnit);
-    const scaledVal = roundNice(baseInUnit * state.scale.factor);
+    const effFactor = getEffectiveIngredientFactor(ing.id);
+    const scaledVal = roundNice(baseInUnit * effFactor);
 
     if (inputEl && inputEl !== skipInputEl) {
       inputEl.value = String(scaledVal);
@@ -480,24 +623,46 @@ function updateIngredientValuesInPlace(recipe, skipInputEl = null) {
         badgeEl.classList.add('hidden');
       }
     }
+
+    if (calEl) {
+      const enabled = ing.isOptional ? ing.isEnabled !== false : true;
+      const scaledCal = enabled ? computeIngredientScaledCalories(ing) : 0;
+      calEl.textContent = `🔥 ${scaledCal} kcal`;
+    }
   }
 
   const factor = roundNice(state.scale.factor);
-  const isScaled = Math.abs(state.scale.factor - 1) >= 0.005;
+  const modified = isAnyPortionModified();
+  const totalCalories = computeTotalRecipeCalories(recipe);
 
   const pill = document.getElementById('scaleBadgePill');
-  if (pill) pill.textContent = `${factor}× ${isScaled ? 'Scaled' : 'Base'}`;
+  if (pill) {
+    pill.textContent =
+      state.scale.mode === 'auto' ? `${factor}× ${modified ? 'Scaled' : 'Base'}` : 'Single-Item Mode';
+  }
+
+  const totalCalEl = document.getElementById('totalRecipeCaloriesValue');
+  if (totalCalEl) totalCalEl.textContent = `${totalCalories} kcal`;
+
+  const headerCalEl = document.getElementById('headerTotalCaloriesPill');
+  if (headerCalEl) headerCalEl.textContent = `🔥 Final Recipe Calories: ${totalCalories} kcal`;
 
   document.querySelectorAll('.mult-pill').forEach((btn) => {
     const m = parseFloat(btn.getAttribute('data-mult'));
-    btn.classList.toggle('active', Math.abs(m - state.scale.factor) < 0.01);
+    btn.classList.toggle(
+      'active',
+      Object.keys(state.scale.customFactors).length === 0 && Math.abs(m - state.scale.factor) < 0.01
+    );
   });
 
   const banner = document.getElementById('scaleStatusBanner');
   const bannerText = document.getElementById('scaleStatusText');
   if (banner && bannerText) {
-    banner.classList.toggle('hidden', !isScaled);
-    bannerText.innerHTML = `Scaled to <strong>${factor}×</strong>`;
+    banner.classList.toggle('hidden', !modified);
+    bannerText.innerHTML =
+      state.scale.mode === 'auto'
+        ? `All ingredients scaled to <strong>${factor}×</strong>`
+        : `Single ingredient portion adjusted (other ingredients kept unchanged)`;
   }
 }
 
@@ -640,11 +805,23 @@ function bindWorkspaceControls(recipe) {
     openRecipeModal(recipe);
   });
 
+  // Scaling Mode Switcher: Auto-Adjust All (Default) vs Single Ingredient Only
+  document.getElementById('modeAutoAdjustBtn')?.addEventListener('click', () => {
+    state.scale.mode = 'auto';
+    renderMainWorkspace();
+  });
+
+  document.getElementById('modeSingleAdjustBtn')?.addEventListener('click', () => {
+    state.scale.mode = 'single';
+    renderMainWorkspace();
+  });
+
   document.querySelectorAll('.mult-pill').forEach((btn) => {
     btn.addEventListener('click', () => {
       const m = parseFloat(btn.getAttribute('data-mult'));
       if (!Number.isFinite(m) || m <= 0) return;
       state.scale.factor = m;
+      state.scale.customFactors = {};
       state.scale.anchorIngredientId = null;
       updateIngredientValuesInPlace(recipe, null);
     });
@@ -664,10 +841,12 @@ function bindWorkspaceControls(recipe) {
     const updatedIngredients = (recipe.ingredients || []).map((ing) => {
       const targetUnit = state.scale.unitOverrides[ing.id] || ing.unit;
       const baseInTarget = convertAmountBetweenUnits(ing.amount, ing.unit, targetUnit);
+      const effFactor = getEffectiveIngredientFactor(ing.id);
       return {
         ...ing,
-        amount: roundNice(baseInTarget * state.scale.factor),
-        unit: targetUnit
+        amount: roundNice(baseInTarget * effFactor),
+        unit: targetUnit,
+        calories: Math.round((Number(ing.calories) || 0) * effFactor)
       };
     });
     const newServings = roundNice((recipe.baseServings || 1) * state.scale.factor);
@@ -683,12 +862,25 @@ function bindWorkspaceControls(recipe) {
     const name = document.getElementById('quickIngName').value.trim();
     const amt = parseFloat(document.getElementById('quickIngAmount').value);
     const unit = document.getElementById('quickIngUnit').value;
+    const cal = parseFloat(document.getElementById('quickIngCalories').value) || 0;
+    const isOptional = Boolean(document.getElementById('quickIngOptional').checked);
     if (!name || !Number.isFinite(amt)) return;
 
-    const baseAmt = roundNice(amt / (state.scale.factor || 1));
+    const divFactor = state.scale.mode === 'auto' ? state.scale.factor || 1 : 1;
+    const baseAmt = roundNice(amt / divFactor);
+    const baseCal = Math.round(cal / divFactor);
     const nextIngs = [
       ...(recipe.ingredients || []),
-      { id: `ing-${Date.now()}`, name, amount: baseAmt, unit, notes: '' }
+      {
+        id: `ing-${Date.now()}`,
+        name,
+        amount: baseAmt,
+        unit,
+        calories: baseCal,
+        isOptional,
+        isEnabled: true,
+        notes: ''
+      }
     ];
     await saveRecipeToServer({ ...recipe, ingredients: nextIngs }, recipe.id);
   });
@@ -752,16 +944,24 @@ async function saveRecipeToServer(payload, existingId = null) {
 
 /* ---------- CREATE / EDIT MODAL ---------- */
 
-function createModalIngredientRowHtml(ing = { name: '', amount: '', unit: 'kg', notes: '' }) {
+function createModalIngredientRowHtml(
+  ing = { name: '', amount: '', unit: 'kg', calories: '', isOptional: false, notes: '' }
+) {
   const opts = ALL_UNITS.map(
     (u) => `<option value="${escapeHtml(u)}" ${u === (ing.unit || 'kg') ? 'selected' : ''}>${escapeHtml(u)}</option>`
   ).join('');
+  const calVal = ing.calories !== undefined && ing.calories !== 0 ? ing.calories : '';
   return `
     <div class="modal-ing-row">
       <input type="text" class="m-ing-name" placeholder="e.g. Pork or Soy Sauce" value="${escapeHtml(ing.name)}" required />
       <input type="number" class="m-ing-amount" placeholder="e.g. 1" step="any" min="0" value="${escapeHtml(ing.amount)}" required />
       <select class="m-ing-unit">${opts}</select>
-      <input type="text" class="m-ing-notes" placeholder="Optional note" value="${escapeHtml(ing.notes || '')}" />
+      <input type="number" class="m-ing-calories" placeholder="kcal (opt)" step="any" min="0" value="${escapeHtml(calVal)}" />
+      <label class="modal-opt-label" title="Check if this ingredient is optional and can be toggled on/off">
+        <input type="checkbox" class="m-ing-optional" ${ing.isOptional ? 'checked' : ''} />
+        <span>Opt</span>
+      </label>
+      <input type="text" class="m-ing-notes" placeholder="Note (opt)" value="${escapeHtml(ing.notes || '')}" />
       <button type="button" class="btn-secondary-sm m-remove-row" title="Remove">✕</button>
     </div>
   `;
@@ -810,8 +1010,8 @@ function openRecipeModal(recipe = null) {
     isEdit && recipe.ingredients?.length
       ? recipe.ingredients
       : [
-          { name: '', amount: '', unit: 'kg', notes: '' },
-          { name: '', amount: '', unit: 'tbsp', notes: '' }
+          { name: '', amount: '', unit: 'kg', calories: '', isOptional: false, notes: '' },
+          { name: '', amount: '', unit: 'tbsp', calories: '', isOptional: false, notes: '' }
         ];
   ingBox.innerHTML = rows.map(createModalIngredientRowHtml).join('');
   attachModalRowRemovers(ingBox);
@@ -844,7 +1044,14 @@ function bindGlobalEvents() {
     const ingBox = document.getElementById('modalIngredientsContainer');
     ingBox.insertAdjacentHTML(
       'beforeend',
-      createModalIngredientRowHtml({ name: '', amount: '', unit: 'tbsp', notes: '' })
+      createModalIngredientRowHtml({
+        name: '',
+        amount: '',
+        unit: 'tbsp',
+        calories: '',
+        isOptional: false,
+        notes: ''
+      })
     );
     attachModalRowRemovers(ingBox);
   });
@@ -883,6 +1090,9 @@ function bindGlobalEvents() {
         name: row.querySelector('.m-ing-name')?.value.trim() || '',
         amount: parseFloat(row.querySelector('.m-ing-amount')?.value) || 0,
         unit: row.querySelector('.m-ing-unit')?.value || 'g',
+        calories: parseFloat(row.querySelector('.m-ing-calories')?.value) || 0,
+        isOptional: Boolean(row.querySelector('.m-ing-optional')?.checked),
+        isEnabled: true,
         notes: row.querySelector('.m-ing-notes')?.value.trim() || ''
       }))
       .filter((i) => i.name.length > 0);

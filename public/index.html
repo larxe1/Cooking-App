@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <title>Cook Book. — Personal Recipe & Proportion Scaler</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+  <link rel="icon" type="image/jpeg" href="/velina.jpg" />
+  <link rel="apple-touch-icon" href="/velina.jpg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;0,9..144,800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -16,6 +19,7 @@
     <header class="topbar">
       <div class="topbar-left">
         <a href="#top" class="brand-logo" id="brandLogoBtn">
+          <img src="/velina.jpg" alt="App Icon" class="brand-icon-img" />
           <span>Cook <span class="brand-b-wrap"><span class="brand-leaf">🌿</span>B</span>ook</span><span class="brand-dot">.</span>
         </a>
         <span class="brand-tag">Personal Recipe &amp; Proportion Scaler</span>
@@ -42,21 +46,13 @@
           <button type="button" class="btn-link-orange" id="sidebarAddBtn">+ Add</button>
         </div>
 
-        <div class="category-pills" id="categoryFilterBar">
-          <!-- Populated dynamically from user's own recipe categories -->
-        </div>
+        <div class="category-pills" id="categoryFilterBar"></div>
 
-        <div class="recipe-list" id="sidebarRecipeList">
-          <!-- Populated dynamically by app.js -->
-        </div>
+        <div class="recipe-list" id="sidebarRecipeList"></div>
       </aside>
 
       <!-- RIGHT MAIN WORKSPACE -->
-      <main class="main-panel" id="mainWorkspace">
-        <!-- Populated dynamically by app.js:
-             - When empty: shows a clear Guided Welcome & "Create Your First Recipe" step-by-step screen
-             - When a recipe is selected: shows the Recipe Header, Automatic Proportion Scaler, Steps/Notes, and Video Player -->
-      </main>
+      <main class="main-panel" id="mainWorkspace"></main>
     </div>
   </div>
 
@@ -102,12 +98,14 @@
           </div>
         </div>
 
-        <!-- STEP 2 GUIDE: INGREDIENTS FOR PROPORTION SCALING -->
+        <!-- STEP 2 GUIDE: INGREDIENTS (WITH CALORIES & OPTIONAL TOGGLE) -->
         <div class="guide-section">
           <div class="guide-section-top">
             <div>
-              <div class="guide-badge">Step 2 — Base Ingredients (Used for Automatic Scaling)</div>
-              <p class="guide-hint">Enter the normal amounts for your recipe (for example: <strong>Pork</strong> | <strong>1</strong> | <strong>kg</strong> and <strong>Soy Sauce</strong> | <strong>1</strong> | <strong>tbsp</strong>).</p>
+              <div class="guide-badge">Step 2 — Base Ingredients, Calories &amp; Optional Flag</div>
+              <p class="guide-hint">
+                Enter your base amounts and optional calories per ingredient (they automatically add up in the final recipe). Check <strong>Optional</strong> for ingredients you want to toggle on/off when cooking.
+              </p>
             </div>
             <button type="button" class="btn-secondary-sm" id="addModalIngredientRowBtn">+ Add Ingredient</button>
           </div>
@@ -115,7 +113,9 @@
             <span>Ingredient Name</span>
             <span>Amount</span>
             <span>Unit</span>
-            <span>Notes (optional)</span>
+            <span>Calories (kcal)</span>
+            <span>Optional?</span>
+            <span>Notes</span>
             <span></span>
           </div>
           <div class="modal-rows-container" id="modalIngredientsContainer"></div>
