@@ -1,0 +1,10 @@
+{
+  "name": "cookbook-pc-app",
+  "version": "1.0.0",
+  "description": "CookBook PC Application & Local SQLite Database Server with Automatic Recipe Proportion Scaling and Video Embeds",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "private": true
+}

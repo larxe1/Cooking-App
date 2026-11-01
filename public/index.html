@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
+  <title>Cook Book. — Personal Recipe & Proportion Scaler</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;0,9..144,800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <!-- MINIMALIST HEADER -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <a href="#top" class="brand-logo" id="brandLogoBtn">
+          <span>Cook <span class="brand-b-wrap"><span class="brand-leaf">🌿</span>B</span>ook</span><span class="brand-dot">.</span>
+        </a>
+        <span class="brand-tag">Personal Recipe &amp; Proportion Scaler</span>
+      </div>
+
+      <div class="topbar-right">
+        <div class="search-wrap">
+          <input type="search" id="searchInput" placeholder="Search my recipes..." aria-label="Search my recipes" />
+        </div>
+        <button type="button" class="btn-secondary" id="openDbModalBtn" title="Backup recipes or view Android Wi-Fi connection">
+          <span class="status-dot"></span>
+          <span id="dbStatusShort">PC Database</span>
+        </button>
+        <button type="button" class="btn-primary" id="openNewRecipeBtn">+ New Recipe</button>
+      </div>
+    </header>
+
+    <!-- MAIN 2-COLUMN WORKSPACE -->
+    <div class="workspace">
+      <!-- LEFT SIDEBAR: MY SAVED RECIPES LIST -->
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <span class="sidebar-title">My Recipes (<span id="sidebarRecipeCount">0</span>)</span>
+          <button type="button" class="btn-link-orange" id="sidebarAddBtn">+ Add</button>
+        </div>
+
+        <div class="category-pills" id="categoryFilterBar">
+          <!-- Populated dynamically from user's own recipe categories -->
+        </div>
+
+        <div class="recipe-list" id="sidebarRecipeList">
+          <!-- Populated dynamically by app.js -->
+        </div>
+      </aside>
+
+      <!-- RIGHT MAIN WORKSPACE -->
+      <main class="main-panel" id="mainWorkspace">
+        <!-- Populated dynamically by app.js:
+             - When empty: shows a clear Guided Welcome & "Create Your First Recipe" step-by-step screen
+             - When a recipe is selected: shows the Recipe Header, Automatic Proportion Scaler, Steps/Notes, and Video Player -->
+      </main>
+    </div>
+  </div>
+
+  <!-- ADD / EDIT RECIPE MODAL (With Clear Numbered Input Guides) -->
+  <div class="modal-backdrop hidden" id="recipeModalBackdrop" role="dialog" aria-modal="true" aria-labelledby="recipeModalTitle">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="recipeModalTitle">Create Recipe</h2>
+        <button type="button" class="modal-close-btn" id="closeRecipeModalBtn" aria-label="Close">✕</button>
+      </div>
+
+      <form id="recipeForm" class="recipe-form">
+        <input type="hidden" id="formRecipeId" />
+
+        <!-- STEP 1 GUIDE: BASIC INFO -->
+        <div class="guide-section">
+          <div class="guide-badge">Step 1 — Recipe Name &amp; Optional Photo</div>
+          <div class="form-row two-col">
+            <div class="form-group">
+              <label for="formTitle">Recipe Name *</label>
+              <input type="text" id="formTitle" placeholder="e.g. Pork Soy Adobo" required />
+            </div>
+            <div class="form-group">
+              <label for="formCategory">Category (optional)</label>
+              <input type="text" id="formCategory" placeholder="e.g. Pork, Dinner, Favorites" value="General" />
+            </div>
+          </div>
+
+          <div class="form-row three-col">
+            <div class="form-group">
+              <label for="formBaseServings">Default Servings</label>
+              <input type="number" id="formBaseServings" min="0.25" step="any" value="1" required />
+            </div>
+            <div class="form-group">
+              <label for="formPrepTime">Cook Time (minutes, optional)</label>
+              <input type="number" id="formPrepTime" min="0" value="0" />
+            </div>
+            <div class="form-group">
+              <label for="formImageUpload">Photo from PC (optional)</label>
+              <input type="file" id="formImageUpload" accept="image/*" />
+              <input type="hidden" id="formImageUrl" />
+            </div>
+          </div>
+        </div>
+
+        <!-- STEP 2 GUIDE: INGREDIENTS FOR PROPORTION SCALING -->
+        <div class="guide-section">
+          <div class="guide-section-top">
+            <div>
+              <div class="guide-badge">Step 2 — Base Ingredients (Used for Automatic Scaling)</div>
+              <p class="guide-hint">Enter the normal amounts for your recipe (for example: <strong>Pork</strong> | <strong>1</strong> | <strong>kg</strong> and <strong>Soy Sauce</strong> | <strong>1</strong> | <strong>tbsp</strong>).</p>
+            </div>
+            <button type="button" class="btn-secondary-sm" id="addModalIngredientRowBtn">+ Add Ingredient</button>
+          </div>
+          <div class="modal-ing-header">
+            <span>Ingredient Name</span>
+            <span>Amount</span>
+            <span>Unit</span>
+            <span>Notes (optional)</span>
+            <span></span>
+          </div>
+          <div class="modal-rows-container" id="modalIngredientsContainer"></div>
+        </div>
+
+        <!-- STEP 3 GUIDE: COOKING STEPS & NOTES -->
+        <div class="guide-section">
+          <div class="guide-badge">Step 3 — Cooking Steps &amp; Personal Notes (Optional)</div>
+          <div class="form-group">
+            <label for="formStepsText">Cooking Steps (Write one step per line)</label>
+            <textarea id="formStepsText" rows="4" placeholder="1. Brown the pork in a pan&#10;2. Add soy sauce and simmer for 25 minutes"></textarea>
+          </div>
+          <div class="form-group" style="margin-top:8px;">
+            <label for="formChefNotes">Personal Notes / Tips</label>
+            <textarea id="formChefNotes" rows="2" placeholder="Any personal reminders or adjustments..."></textarea>
+          </div>
+        </div>
+
+        <!-- STEP 4 GUIDE: YOUTUBE / TIKTOK / WEBSITE LINK -->
+        <div class="guide-section">
+          <div class="guide-section-top">
+            <div>
+              <div class="guide-badge">Step 4 — YouTube, TikTok, or Website Link (Optional)</div>
+              <p class="guide-hint">Paste a link if this recipe came from YouTube, TikTok, or a website so you can watch or open it anytime.</p>
+            </div>
+            <button type="button" class="btn-secondary-sm" id="addModalLinkRowBtn">+ Add Another Link</button>
+          </div>
+          <div class="modal-rows-container" id="modalLinksContainer"></div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn-danger-outline hidden" id="deleteRecipeBtn">🗑 Delete Recipe</button>
+          <div class="modal-footer-right">
+            <button type="button" class="btn-secondary" id="cancelRecipeModalBtn">Cancel</button>
+            <button type="submit" class="btn-primary">💾 Save Recipe</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- PC DATABASE, BACKUP & ANDROID SYNC MODAL -->
+  <div class="modal-backdrop hidden" id="dbModalBackdrop" role="dialog" aria-modal="true" aria-labelledby="dbModalTitle">
+    <div class="modal-card modal-card-sm">
+      <div class="modal-header">
+        <h2 id="dbModalTitle">PC Database, Backup &amp; Android Sync</h2>
+        <button type="button" class="modal-close-btn" id="closeDbModalBtn" aria-label="Close">✕</button>
+      </div>
+      <div class="db-modal-body">
+        <div id="dbModalInfoContent"></div>
+        <div class="db-backup-actions">
+          <button type="button" class="btn-primary" id="exportRecipesBtn">⬇ Export Backup (.json)</button>
+          <button type="button" class="btn-secondary" id="importRecipesTriggerBtn">⬆ Import Backup (.json)</button>
+          <input type="file" id="importRecipesFileInput" accept=".json,application/json" class="hidden" />
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
